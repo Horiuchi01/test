@@ -1,0 +1,171 @@
+version: "3.9"
+
+services:
+
+  # [container_https-portal]
+  container_https-portal:
+    # イメージを指定
+    image: steveltn/https-portal
+    environment:
+      # - product用 -
+      #DOMAINS: "example.com -> http://container_nginx, www.example.com -> http://container_nginx"
+      #STAGE: "production"
+      # - local用 -
+      DOMAINS: "localhost -> http://container_nginx"
+      STAGE: "local"
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      # ボリュームを指定
+      - tls-storage:/var/lib/https-portal
+    # 自動起動の有効化 [no, on-failure, always, unless-stopped]
+    restart: unless-stopped
+
+  # [container_nginx]
+  container_nginx:
+    # Nginxコンテナのもとになるイメージを指定
+    image: nginx
+    environment:
+      # timezoon
+      TZ: "Asia/Tokyo"
+    # ホスト側の80番ポートとコンテナ側の80番ポートをつなげる
+    ports:
+      - "8080:80"
+    volumes:
+      # ホストPC側をnginxにマウント
+      - ./src:/var/www
+      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+    restart: unless-stopped
+    # 依存関係
+    depends_on:
+      - container_php
+
+  # [container_php]
+  # nginxのdefault.conf内のfastcgi_passの値はこれになる
+  container_php:
+    # コンテナの元になるDockerfileがおいてあるパス
+    build: ./docker/php
+    # container を run したときに container 内で使える環境変数
+    environment:
+      # timezoon
+      TZ: "Asia/Tokyo"
+    ports:
+      # <--- productは閉じる
+      - "4173:4173" # <--- productは閉じる preview 用
+      - "5173:5173" # <--- productは閉じる HMR 用
+      - "5175:5175" # <--- productは閉じる HMR 用
+    volumes:
+      # ホストPC側のプログラムソースディレクトリをマウント
+      - ./src:/var/www
+    # 自動起動の有効化 [no, on-failure, always, unless-stopped]
+    restart: unless-stopped
+
+  # cron
+  container_cron:
+    # コンテナの元になるDockerfileがおいてあるパス
+    build: ./docker/php
+    # container を run したときに container 内で使える環境変数
+    environment:
+      # timezoon
+      TZ: "Asia/Tokyo"
+    volumes:
+      # ホストPC側のプログラムソースディレクトリをマウント
+      - ./src:/var/www
+    restart: unless-stopped
+    # 自動起動の有効化 [no, on-failure, always, unless-stopped]
+    entrypoint:
+      - cron
+      - -f
+    # 依存関係
+    depends_on:
+      - container_nginx
+
+  # queue
+  container_worker:
+    # コンテナの元になるDockerfileがおいてあるパス
+    build: ./docker/php
+    # container を run したときに container 内で使える環境変数
+    environment:
+      # timezoon
+      TZ: "Asia/Tokyo"
+    volumes:
+      # ホストPC側のプログラムソースディレクトリをマウント
+      - "./src:/var/www"
+    # 自動起動の有効化 [no, on-failure, always, unless-stopped]
+    restart: unless-stopped
+    entrypoint:
+      - "/usr/bin/supervisord"
+    depends_on:
+      - container_nginx
+
+  # [container_db]
+  # laravel .envで使うDB_HOST
+  container_db:
+    # イメージを指定
+    image: mysql:8
+    # db設定
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      # laravel .envで使うDB_DATABASEの値
+      MYSQL_DATABASE: database
+      # laravel .envで使うDB_USERNAMEの値
+      MYSQL_USER: docker
+      # laravel .envで使うDB_PASSWORDの値
+      MYSQL_PASSWORD: docker
+      # timezoon
+      TZ: "Asia/Tokyo"
+    # ホスト側のポートとコンテナ側のポートをつなげる
+    ports:
+      - 3306:3306
+    # コマンドで設定
+    command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      # ボリュームを指定
+      - db-storage:/var/lib/mysql
+      # ホストPC側のプログラムソースディレクトリをマウント
+      - ./docker/db/my.conf:/etc/mysql/conf.d/my.conf
+      - ./docker/db/sql:/docker-entrypoint-initdb.d
+    # 自動起動の有効化 [no, on-failure, always, unless-stopped]
+    restart: unless-stopped
+
+  # [container_redis]
+  # laravel .envで使うREDIS_HOST
+  container_redis:
+    # イメージを指定
+    image: redis:latest
+    volumes:
+      # ボリュームを指定
+      - redis-storage:/data
+    # ホスト側のポートとコンテナ側のポートをつなげる
+    ports:
+      - 6379:6379
+    # 自動起動の有効化 [no, on-failure, always, unless-stopped]
+    restart: unless-stopped
+
+  # [container_mailhog] # <--- productは閉じる
+  container_mailhog:
+    image: mailhog/mailhog
+    # ホスト側のポートとコンテナ側のポートをつなげる
+    ports:
+      - 8025:8025
+
+  container_minio:
+    image: minio/minio:RELEASE.2021-06-17T00-10-46Z
+    # image: minio/minio:latest
+    volumes:
+      - minio-storage:/data
+    environment:
+      MINIO_ROOT_USER: MinioAdmin
+      MINIO_ROOT_PASSWORD: MinioAdmin
+    # command: server /data --address :49000 --console-address :49001
+    command: server /data --address :49000
+    ports:
+      - "49000:49000"
+
+# データを保存するボリューム
+volumes:
+  tls-storage:
+  redis-storage:
+  db-storage:
+  minio-storage:

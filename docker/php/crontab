@@ -1,0 +1,4 @@
+# このファイルの末尾は必ず空行にして下さいください！入れないと docker build 時にこけます
+# m h  dom mon dow   command
+# * * * * * echo `date` >> /var/log/cron.log
+* * * * * /usr/local/bin/php /var/www/artisan schedule:run >> /var/www/storage/logs/laravel.log 2>&1
